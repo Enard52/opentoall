@@ -9,6 +9,10 @@ jobs:
   pytest:
     name: pytest
     runs-on: ubuntu-latest
+    env:
+      DEBUG: "True"
+      SECRET_KEY: ci-only-not-a-production-secret
+      USE_POSTGRES: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,7 +25,3 @@ jobs:
         run: python manage.py collectstatic --noinput
       - name: Run tests
         run: pytest -q
-        env:
-          DEBUG: "True"
-          SECRET_KEY: ci-only-not-a-production-secret
-          USE_POSTGRES: "0"
