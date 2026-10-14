@@ -130,6 +130,19 @@ def test_health_does_not_touch_the_database(client):
     assert client.head(reverse("health")).status_code == 200
 
 
+def test_health_is_fast_enough_for_cron(client, django_assert_num_queries):
+    """The health endpoint must complete in milliseconds for cron-job.org.
+
+    cron-job.org disables jobs that time out repeatedly (~30s limit).
+    This endpoint powers both the keep-alive cron (every 10 min) and
+    Kubernetes liveness probes, so it must never touch the database.
+    """
+    with django_assert_num_queries(0):
+        response = client.get(reverse("health"))
+    assert response.status_code == 200
+    assert response.content == b"ok"
+
+
 @pytest.mark.django_db
 def test_fetch_issues_trigger_requires_token(client, settings):
     settings.FETCH_ISSUES_TOKEN = "secret-token"
