@@ -95,8 +95,10 @@ def test_explore_page_and_htmx(client):
     assert full.status_code == 200
     assert b"Fix bug" in full.content
     assert b'id="list-loader"' in full.content
-    assert b'role="status"' in full.content
-    assert b'aria-live="polite"' in full.content
+    # The live region exists and starts empty so HTMX events can fill it
+    # (aria-live only announces content changes).
+    assert b'<span id="list-status" class="sr-only" role="status" aria-live="polite"></span>' in full.content
+    assert b"htmx:beforeRequest" in full.content
 
     partial = client.get(reverse("explore"), HTTP_HX_REQUEST="true")
     assert partial.status_code == 200
