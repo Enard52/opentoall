@@ -15,7 +15,6 @@ pensée pour les développeurs africains.
 
 <p>
   <a href="https://github.com/Ymax27/opentoall/actions/workflows/tests.yml"><img src="https://github.com/Ymax27/opentoall/actions/workflows/tests.yml/badge.svg" alt="Tests" /></a>
-  <a href="https://github.com/Ymax27/opentoall/actions/workflows/fly-deploy.yml"><img src="https://github.com/Ymax27/opentoall/actions/workflows/fly-deploy.yml/badge.svg" alt="Fly Deploy" /></a>
 </p>
 
 </div>
