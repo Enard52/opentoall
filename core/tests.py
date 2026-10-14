@@ -1,6 +1,14 @@
+import re
+from datetime import timedelta
+from html import unescape
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.template.loader import render_to_string
 from django.urls import reverse
+from django.utils import timezone, translation
 
 from core.models import Contribution, Issue, Profile
 from core.services.metrics import (
@@ -155,6 +163,94 @@ def test_fetch_issues_trigger_starts_async(client, settings, monkeypatch):
 def test_explore_filters_have_accessible_labels(client):
     resp = client.get(reverse("explore"))
     content = resp.content.decode()
-    for field_id in ("search-filter", "sort-filter", "language-filter"):
+    for field_id in ("search-filter", "sort-filter", "language-filter", "clone-size-filter"):
         assert f'for="{field_id}"' in content
         assert f'id="{field_id}"' in content
+
+
+@pytest.mark.parametrize("has_updated_at", [True, False])
+def test_issue_card_updated_date(has_updated_at):
+    updated_at = timezone.now() - timedelta(days=3, minutes=1) if has_updated_at else None
+    issue = Issue(
+        pk=1, github_issue_id=1, title="Test issue", url="https://github.com/a/b/issues/1",
+        repo_full_name="a/b", issue_updated_at=updated_at,
+    )
+    with translation.override("fr"):
+        html = render_to_string("core/_issue_card.html", {"issue": issue})
+
+    if has_updated_at:
+        assert f'<time datetime="{updated_at.isoformat()}">' in html
+        assert "Mise à jour" in html
+        assert "il y a 3 jours" in html.replace("\xa0", " ")
+    else:
+        assert "<time" not in html
+        assert "Mise à jour" not in html
+        assert "None" not in html
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("htmx", [False, True])
+@pytest.mark.parametrize(
+    "max_size, expected_sizes",
+    [("", [4999, 5000, 49999, 50000]), ("5000", [4999]), ("50000", [4999, 5000, 49999])],
+)
+def test_explore_clone_size_filter(client, max_size, expected_sizes, htmx):
+    cache.clear()
+    for size in [4999, 5000, 49999, 50000]:
+        Issue.objects.create(
+            github_issue_id=size, title=f"Repo {size}", url="https://github.com/a/b",
+            repo_full_name="a/b", repo_size_kb=size, stars_count=size,
+        )
+
+    response = client.get(
+        reverse("explore"), {"max_size": max_size},
+        HTTP_HX_REQUEST="true" if htmx else "false",
+    )
+    assert response.status_code == 200
+    assert response.context["total_count"] == len(expected_sizes)
+    assert sorted(issue.repo_size_kb for issue in response.context["page_obj"]) == expected_sizes
+    html = response.content.decode()
+    for size in [4999, 5000, 49999, 50000]:
+        assert (f">Repo {size}</h3>" in html) == (size in expected_sizes)
+    if htmx:
+        assert "<html" not in html
+    else:
+        assert f'<option value="{max_size}" selected>' in html
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("htmx", [False, True])
+@pytest.mark.parametrize("max_size", [5000, 50000])
+def test_explore_clone_size_filter_pagination(client, max_size, htmx):
+    cache.clear()
+    Issue.objects.bulk_create([
+        Issue(
+            github_issue_id=i + 1, title=f"Matching {i}", url="https://github.com/a/b",
+            repo_full_name="a/b", repo_size_kb=max_size - 1, stars_count=i,
+            language="Python",
+        )
+        for i in range(31)
+    ])
+    Issue.objects.create(
+        github_issue_id=100, title="Excluded boundary", url="https://github.com/a/b",
+        repo_full_name="a/b", repo_size_kb=max_size, stars_count=100, language="Python",
+    )
+    params = {"max_size": str(max_size), "language": "Python", "sort": "stars"}
+    headers = {"HTTP_HX_REQUEST": "true" if htmx else "false"}
+    response = client.get(reverse("explore"), params, **headers)
+    assert response.context["total_count"] == 31
+    links = re.findall(r'(?:href|hx-get)="([^"]+)"', response.content.decode())
+    page_links = [link for link in links if "page=" in link]
+    assert page_links
+    for link in page_links:
+        query = parse_qs(urlsplit(unescape(link)).query)
+        assert query["max_size"] == [str(max_size)]
+        assert query["language"] == ["Python"]
+        assert query["sort"] == ["stars"]
+
+    next_page = next(link for link in page_links if "page=2" in link)
+    response = client.get(reverse("explore") + "?" + urlsplit(unescape(next_page)).query, **headers)
+    assert response.status_code == 200
+    assert response.context["page_obj"].number == 2
+    assert len(response.context["page_obj"]) == 1
+    assert b"Excluded boundary" not in response.content
