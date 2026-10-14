@@ -94,6 +94,9 @@ def test_explore_page_and_htmx(client):
     full = client.get(reverse("explore"))
     assert full.status_code == 200
     assert b"Fix bug" in full.content
+    assert b'id="list-loader"' in full.content
+    assert b'role="status"' in full.content
+    assert b'aria-live="polite"' in full.content
 
     partial = client.get(reverse("explore"), HTTP_HX_REQUEST="true")
     assert partial.status_code == 200
